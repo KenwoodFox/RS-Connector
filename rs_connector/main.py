@@ -29,16 +29,16 @@ def main():
 
     # Initialize streamer and API client
     streamer = Streamer(video_device, robot_id, stream_key, ffmpeg_opts)
-    api_client = APIClient(api_url, robot_id)
+    api_client = APIClient(robot_id, stream_key, api_url)
 
     # Main loop
     try:
         # Start streaming
         streamer.start_stream()
+        api_client.start()
 
         # API client loop
         while True:
-            api_client.post_status({"status": "online"})
             connected = streamer.is_running()
             bitrate = streamer.get_bitrate() or "unknown"
             if connected:
@@ -52,6 +52,7 @@ def main():
         logging.info("Shutting down...")
     finally:
         streamer.stop_stream()
+        api_client.stop()
 
 
 if __name__ == "__main__":
