@@ -34,6 +34,9 @@ class APIClient:
         self.relay_server = None
         self.relay_clients = set()
 
+        # Pong event for main thread to wait on
+        self.pong_event = threading.Event()
+
     def get_control_host(self):
         # Try /v1/get_service/rscontrol first
         try:
@@ -162,6 +165,7 @@ class APIClient:
                                     or j.get("type") == "RS_PING"
                                 ):
                                     pong_time = asyncio.get_event_loop().time()
+                                    self.pong_event.set()
 
                                 # Forward to relay clients
                                 await self.send_to_relay_clients(message)
@@ -228,3 +232,6 @@ class APIClient:
         except Exception as e:
             self.logger.error(f"Failed to get jsmpeg video endpoint: {e}")
             return None
+
+    def wait_for_pong(self, timeout=10):
+        return self.pong_event.wait(timeout)

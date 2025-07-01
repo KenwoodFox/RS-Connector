@@ -43,8 +43,10 @@ def main():
     try:
         # Start API Client
         api_client.start()
-        # Wait for API to settle TODO: Actually check pong back
-        time.sleep(5)
+        # Wait for API to settle by waiting for pong
+        if not api_client.wait_for_pong(timeout=10):
+            logging.error("Did not receive pong from control WebSocket. Exiting.")
+            return
 
         while True:
             if stream_type == "rtmp":
