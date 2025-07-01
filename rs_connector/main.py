@@ -2,6 +2,7 @@ import os
 import time
 import logging
 import coloredlogs
+import asyncio
 from .streamer import Streamer
 from .api_client import APIClient
 
@@ -14,53 +15,71 @@ def main():
 
     # Get environment variables
     video_device = os.environ.get("VIDEO_DEVICE", "rs_connector/test_pattern.jpg")
+    stream_type = os.environ.get("STREAM_TYPE", "jsmpeg").lower()
     stream_key = os.environ.get("STREAM_KEY", "")
     robot_id = os.environ.get("ROBOT_ID")
     api_url = os.environ.get("API_URL")
     ffmpeg_opts = os.environ.get("FFMPEG_OPTS", "")
+    xres = int(os.environ.get("VIDEO_XRES", 768))
+    yres = int(os.environ.get("VIDEO_YRES", 432))
+    framerate = int(os.environ.get("VIDEO_FRAMERATE", 25))
+    kbps = int(os.environ.get("VIDEO_KBPS", 350))
 
     # Validate environment variables
-    if not stream_key:
-        logging.error("STREAM_KEY not set. Exiting.")
-        return
     if not robot_id:
         logging.error("ROBOT_ID not set. Exiting.")
+        return
+    if not stream_key:
+        logging.error("STREAM_KEY not set. Exiting.")
         return
 
     # Initialize streamer and API client
     streamer = Streamer(video_device, robot_id, stream_key, ffmpeg_opts)
     api_client = APIClient(robot_id, stream_key, api_url)
 
-    # Main loop
+    max_restarts = 5
+    restart_attempts = 0
+
     try:
-        # Start streaming
-        streamer.start_stream()
+        # Start API Client
         api_client.start()
+        # Wait for API to settle TODO: Actually check pong back
+        time.sleep(5)
 
-        restart_attempts = 0
-        max_restarts = 5
-
-        # API client loop
         while True:
-            connected = streamer.is_running()
-            bitrate = streamer.get_bitrate() or "unknown"
-            if connected:
-                logging.debug(f"Connected to RTMP. Bitrate: {bitrate}")
-                restart_attempts = 0  # Reset on success
-            else:
-                logging.error("ffmpeg process not running!")
-                if restart_attempts < max_restarts:
-                    logging.info("Attempting to restart ffmpeg...")
-                    streamer.start_stream()
-                    restart_attempts += 1
-                else:
+            if stream_type == "rtmp":
+                streamer.start_stream()
+            elif stream_type == "jsmpeg":
+                video_endpoint = api_client.get_jsmpeg_video_endpoint()
+                if not video_endpoint:
                     logging.error(
-                        "Max ffmpeg restart attempts reached. Exiting or marking unhealthy."
+                        "Could not get robot video endpoint. Retrying in 10s."
                     )
-                    break  # Or set a health flag, or sys.exit(1)
-            time.sleep(10)
+                    time.sleep(10)
+                    restart_attempts += 1
+                    if restart_attempts >= max_restarts:
+                        logging.error("Max ffmpeg restart attempts reached. Exiting.")
+                        break
+                    continue
+                streamer.stream_key = stream_key or video_endpoint.get("identifier", "")
+                streamer.start_jsmpeg_stream(
+                    video_endpoint, xres=xres, yres=yres, framerate=framerate, kbps=kbps
+                )
+            else:
+                logging.error(f"Unknown STREAM_TYPE: {stream_type}")
+                return
 
-    # Wait for keyboard interrupt
+            while streamer.is_running():
+                time.sleep(1)
+
+            logging.error("ffmpeg process not running!")
+            restart_attempts += 1
+            if restart_attempts >= max_restarts:
+                logging.error("Max ffmpeg restart attempts reached. Exiting.")
+                break
+            logging.info("Attempting to restart ffmpeg in 5 seconds...")
+            time.sleep(5)
+
     except KeyboardInterrupt:
         logging.info("Shutting down...")
     finally:

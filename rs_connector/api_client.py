@@ -210,3 +210,21 @@ class APIClient:
         if self.thread:
             self.thread.join()
         self.logger.info("WebSocket client stopped.")
+
+    def get_jsmpeg_video_endpoint(self):
+        """
+        Query the robotstreamer API for the jsmpeg video endpoint for this robot.
+
+        This format comes from send_video.py of the RS docs
+        """
+
+        url = f"{self.api_url}/v1/get_endpoint/jsmpeg_video_capture/{self.robot_id}"
+        self.logger.info(f"Querying video endpoint: {url}")
+        try:
+            resp = requests.get(url)
+            data = resp.json()
+            self.logger.info(f"Video endpoint response: {data}")
+            return data  # Should contain 'host' and 'port'
+        except Exception as e:
+            self.logger.error(f"Failed to get jsmpeg video endpoint: {e}")
+            return None

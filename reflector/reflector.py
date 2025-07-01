@@ -24,7 +24,8 @@ def update_image(text):
         font = ImageFont.truetype(FONT_PATH, 48)
     except Exception:
         font = ImageFont.load_default()
-    w, h = draw.textsize(text, font=font)
+    bbox = draw.textbbox((0, 0), text, font=font)
+    w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
     draw.text(
         ((IMG_SIZE[0] - w) // 2, (IMG_SIZE[1] - h) // 2),
         text,

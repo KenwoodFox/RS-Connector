@@ -26,9 +26,34 @@ class Streamer:
             f"ffmpeg {input_arg} {self.ffmpeg_opts} -c:v libx264 -f flv {self.rtmp_url}"
         )
         self.logger.info(f"Starting ffmpeg: {cmd}")
-        # Suppress ffmpeg output unless error
         self.proc = subprocess.Popen(
-            cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            cmd,
+            shell=True,
+        )
+
+    def start_jsmpeg_stream(
+        self,
+        video_endpoint,
+        xres=768,
+        yres=432,
+        framerate=25,
+        kbps=350,
+        rotation_option="",
+    ):
+        """
+        Start ffmpeg for robot jsmpeg video streaming using the provided endpoint dict.
+        video_endpoint: dict with 'host' and 'port'
+        """
+
+        host = video_endpoint["host"]
+        port = video_endpoint["port"]
+        url = f"http://{host}:{port}/{self.stream_key}/{xres}/{yres}/"
+        input_arg = f"-f v4l2 -framerate {framerate} -video_size {xres}x{yres} -r {framerate} -i {self.video_device} {rotation_option}"
+        cmd = f"ffmpeg {input_arg} -f mpegts -codec:v mpeg1video -b:v {kbps}k -bf 0 -muxdelay 0.001 {url}"
+        self.logger.info(f"Starting ffmpeg (jsmpeg): {cmd}")
+        self.proc = subprocess.Popen(
+            cmd,
+            shell=True,
         )
 
     def stop_stream(self):
