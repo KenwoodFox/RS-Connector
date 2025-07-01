@@ -1,3 +1,4 @@
+import time
 import logging
 import asyncio
 import websockets
@@ -7,7 +8,9 @@ import requests
 
 
 class APIClient:
-    def __init__(self, robot_id, stream_key, api_url=None):
+    def __init__(
+        self, robot_id, stream_key, api_url=None, relay_host="0.0.0.0", relay_port=8765
+    ):
         # Setup variables
         self.robot_id = robot_id
         self.stream_key = stream_key
@@ -24,6 +27,12 @@ class APIClient:
         self.async_stop_event = None  # For async shutdown
         self.ping_task = None
         self.receive_task = None
+
+        # Relay server
+        self.relay_host = relay_host
+        self.relay_port = relay_port
+        self.relay_server = None
+        self.relay_clients = set()
 
     def get_control_host(self):
         # Try /v1/get_service/rscontrol first
@@ -50,6 +59,47 @@ class APIClient:
             self.logger.error(f"Failed to get_endpoint/rscontrol_robot: {e}")
         return None
 
+    # ================================
+    # Relay server
+    # ================================
+    async def relay_handler(self, websocket):
+        # Register client
+        self.relay_clients.add(websocket)
+        self.logger.info(f"Relay client connected: {websocket.remote_address}")
+        try:
+            await websocket.send(json.dumps({"rs_connector": time.time()}))
+            await websocket.wait_closed()  # Keeps the handler alive until the client disconnects
+        finally:
+            self.relay_clients.remove(websocket)
+            self.logger.info(f"Relay client disconnected: {websocket.remote_address}")
+
+    async def start_relay_server(self):
+        self.relay_server = await websockets.serve(
+            self.relay_handler, self.relay_host, self.relay_port
+        )
+        self.logger.info(
+            f"Relay WebSocket server started on ws://{self.relay_host}:{self.relay_port}"
+        )
+
+    async def send_to_relay_clients(self, message):
+        # Forward message to all connected relay clients
+        if self.relay_clients:
+            self.logger.debug(
+                f"Processing {len(self.relay_clients)} clients. Message: {message.rstrip()}"
+            )
+            try:
+                for client in list(self.relay_clients):
+                    try:
+                        await client.send(message)
+                        self.logger.debug(f"Sent to client: {client}")
+                    except Exception as e:
+                        self.logger.error(f"Error sending to client {client}: {e}")
+            except Exception as e:
+                self.logger.error(f"Exception during relay_clients iteration: {e}")
+
+    # ================================
+    # Websocket Client System
+    # ================================
     async def ws_handler(self):
         # Async event for clean shutdown
         self.async_stop_event = asyncio.Event()
@@ -63,6 +113,8 @@ class APIClient:
         url = f"{h['protocol']}://{h['host']}:{h['port']}/echo"
         self.logger.info(f"Connecting to control WebSocket: {url}")
         try:
+            # Start relay server
+            await self.start_relay_server()
             async with websockets.connect(url) as websocket:
                 self.ws = websocket
                 # Handshake
@@ -103,12 +155,6 @@ class APIClient:
                     try:
                         async for message in websocket:
                             # Log messages we get but only mark important/user messages as info
-                            if "user" not in message:
-                                self.logger.debug(f"Received: {message.rstrip()}")
-                            else:
-                                self.logger.info(f"Received: {message.rstrip()}")
-
-                            # Check if we got a pong or ping
                             try:
                                 j = json.loads(message)
                                 if (
@@ -116,6 +162,9 @@ class APIClient:
                                     or j.get("type") == "RS_PING"
                                 ):
                                     pong_time = asyncio.get_event_loop().time()
+
+                                # Forward to relay clients
+                                await self.send_to_relay_clients(message)
                             except Exception:
                                 pass
                     except websockets.ConnectionClosed:
@@ -135,6 +184,10 @@ class APIClient:
                 self.receive_task.cancel()
                 await websocket.close()
                 self.logger.info("WebSocket closed cleanly.")
+                # Stop relay server
+                self.relay_server.close()
+                await self.relay_server.wait_closed()
+                self.logger.info("Relay WebSocket server stopped.")
         except Exception as e:
             self.logger.error(f"WebSocket error: {e}")
 

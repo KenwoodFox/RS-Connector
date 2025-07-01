@@ -37,14 +37,27 @@ def main():
         streamer.start_stream()
         api_client.start()
 
+        restart_attempts = 0
+        max_restarts = 5
+
         # API client loop
         while True:
             connected = streamer.is_running()
             bitrate = streamer.get_bitrate() or "unknown"
             if connected:
                 logging.debug(f"Connected to RTMP. Bitrate: {bitrate}")
+                restart_attempts = 0  # Reset on success
             else:
                 logging.error("ffmpeg process not running!")
+                if restart_attempts < max_restarts:
+                    logging.info("Attempting to restart ffmpeg...")
+                    streamer.start_stream()
+                    restart_attempts += 1
+                else:
+                    logging.error(
+                        "Max ffmpeg restart attempts reached. Exiting or marking unhealthy."
+                    )
+                    break  # Or set a health flag, or sys.exit(1)
             time.sleep(10)
 
     # Wait for keyboard interrupt
