@@ -1,5 +1,6 @@
 import os
 import subprocess
+import logging
 
 
 class Streamer:
@@ -11,6 +12,8 @@ class Streamer:
         self.rtmp_url = (
             f"rtmp://rtmp.robotstreamer.com/live/{self.robot_id}?key={self.stream_key}"
         )
+        self.proc = None
+        self.logger = logging.getLogger("Streamer")
 
     def start_stream(self):
         # If it's a video device (e.g., /dev/video0)
@@ -22,9 +25,21 @@ class Streamer:
         cmd = (
             f"ffmpeg {input_arg} {self.ffmpeg_opts} -c:v libx264 -f flv {self.rtmp_url}"
         )
-        print(f"[Streamer] Running: {cmd}")
-        self.proc = subprocess.Popen(cmd, shell=True)
+        self.logger.info(f"Starting ffmpeg: {cmd}")
+        # Suppress ffmpeg output unless error
+        self.proc = subprocess.Popen(
+            cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
 
     def stop_stream(self):
-        if hasattr(self, "proc"):
+        if self.proc:
             self.proc.terminate()
+            self.proc.wait()
+            self.logger.info("Stopped ffmpeg process.")
+
+    def is_running(self):
+        return self.proc and self.proc.poll() is None
+
+    def get_bitrate(self):
+        # Stub: In a real implementation, parse ffmpeg logs or use ffprobe
+        return None
