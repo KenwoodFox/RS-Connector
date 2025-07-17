@@ -27,7 +27,7 @@ def main():
     xres = int(os.environ.get("VIDEO_XRES", 768))
     yres = int(os.environ.get("VIDEO_YRES", 432))
     framerate = int(os.environ.get("VIDEO_FRAMERATE", 25))
-    kbps = int(os.environ.get("VIDEO_KBPS", 350))
+    kbps = int(os.environ.get("VIDEO_KBPS", 700))
 
     # Validate environment variables
     if not robot_id:
@@ -55,11 +55,19 @@ def main():
         while True:
             if stream_type == "rtmp":
                 streamer.start_stream()
+
+            # jsmpeg robot streams
             elif stream_type == "jsmpeg":
+                # Get Endpoints
                 video_endpoint = api_client.get_jsmpeg_video_endpoint()
-                if not video_endpoint:
+                audio_endpoint = api_client.get_jsmpeg_audio_endpoint()
+                logging.info(
+                    f"Setting up {stream_type} with endpoints {video_endpoint} and {audio_endpoint}"
+                )
+
+                if not video_endpoint or not audio_endpoint:
                     logging.error(
-                        "Could not get robot video endpoint. Retrying in 10s."
+                        "Could not get robot video or audio endpoint. Retrying in 10s."
                     )
                     time.sleep(10)
                     restart_attempts += 1
@@ -69,14 +77,18 @@ def main():
                     continue
                 streamer.stream_key = stream_key or video_endpoint.get("identifier", "")
                 streamer.start_jsmpeg_stream(
-                    video_endpoint, xres=xres, yres=yres, framerate=framerate, kbps=kbps
+                    video_endpoint,
+                    xres=xres,
+                    yres=yres,
+                    framerate=framerate,
+                    kbps=kbps,
+                    audio_endpoint=audio_endpoint,
                 )
+                while True:
+                    time.sleep(1)
             else:
                 logging.error(f"Unknown STREAM_TYPE: {stream_type}")
                 return
-
-            while streamer.is_running():
-                time.sleep(1)
 
             logging.error("ffmpeg process not running!")
             restart_attempts += 1

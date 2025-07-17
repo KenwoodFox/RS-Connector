@@ -263,23 +263,35 @@ class APIClient:
         self.stop_camera_alive_message()
         self.logger.info("WebSocket client stopped.")
 
-    def get_jsmpeg_video_endpoint(self):
+    def get_jsmpeg_endpoint(self, kind="video"):
         """
-        Query the robotstreamer API for the jsmpeg video endpoint for this robot.
-
-        This format comes from send_video.py of the RS docs
+        Query the robotstreamer API for the jsmpeg video or audio endpoint for this robot.
+        kind: 'video' or 'audio'
         """
 
-        url = f"{self.api_url}/v1/get_endpoint/jsmpeg_video_capture/{self.camera_id}"
-        self.logger.info(f"Querying video endpoint: {url}")
+        if kind == "video":
+            endpoint = "jsmpeg_video_capture"
+        elif kind == "audio":
+            endpoint = "jsmpeg_audio_capture"
+        else:
+            raise ValueError(f"Unknown endpoint kind: {kind}")
+
+        url = f"{self.api_url}/v1/get_endpoint/{endpoint}/{self.camera_id}"
+        self.logger.info(f"Querying {kind} endpoint: {url}")
         try:
             resp = requests.get(url)
             data = resp.json()
-            self.logger.info(f"Video endpoint response: {data}")
+            self.logger.info(f"{kind.capitalize()} endpoint response: {data}")
             return data  # Should contain 'host' and 'port'
         except Exception as e:
-            self.logger.error(f"Failed to get jsmpeg video endpoint: {e}")
+            self.logger.error(f"Failed to get jsmpeg {kind} endpoint: {e}")
             return None
+
+    def get_jsmpeg_video_endpoint(self):
+        return self.get_jsmpeg_endpoint("video")
+
+    def get_jsmpeg_audio_endpoint(self):
+        return self.get_jsmpeg_endpoint("audio")
 
     def wait_for_pong(self, timeout=10):
         return self.pong_event.wait(timeout)
