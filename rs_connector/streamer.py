@@ -100,7 +100,7 @@ class Streamer:
                 )
             else:
                 audio_url = url  # fallback for testing
-            input_arg = f"-f lavfi -ac {audio_channels} -i sine=frequency=440:sample_rate={audio_sample_rate}"
+            input_arg = f"-f lavfi -ac {audio_channels} -i anullsrc=channel_layout=mono:sample_rate={audio_sample_rate}"
             audio_args = f"-c:a mp2 -b:a {audio_kbps}k -muxdelay 0.01"
             cmd = f"ffmpeg {input_arg} {audio_args} -f mpegts {audio_url}"
             self.logger.info(f"Starting ffmpeg (jsmpeg audio): {cmd}")
