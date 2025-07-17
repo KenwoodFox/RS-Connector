@@ -8,9 +8,12 @@ from .api_client import APIClient
 
 
 def main():
-    # Configure logging
+    # Configure logging with coloredlogs for all loggers
+    log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
     coloredlogs.install(
-        level="INFO", fmt="%(asctime)s %(levelname)s [%(name)s] %(message)s"
+        level=log_level,
+        fmt="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+        logger=logging.getLogger(),
     )
 
     # Get environment variables
@@ -18,6 +21,7 @@ def main():
     stream_type = os.environ.get("STREAM_TYPE", "jsmpeg").lower()
     stream_key = os.environ.get("STREAM_KEY", "")
     robot_id = os.environ.get("ROBOT_ID")
+    camera_id = os.environ.get("CAMERA_ID")
     api_url = os.environ.get("API_URL")
     ffmpeg_opts = os.environ.get("FFMPEG_OPTS", "")
     xres = int(os.environ.get("VIDEO_XRES", 768))
@@ -35,7 +39,7 @@ def main():
 
     # Initialize streamer and API client
     streamer = Streamer(video_device, robot_id, stream_key, ffmpeg_opts)
-    api_client = APIClient(robot_id, stream_key, api_url)
+    api_client = APIClient(robot_id, camera_id, stream_key, api_url)
 
     max_restarts = 5
     restart_attempts = 0

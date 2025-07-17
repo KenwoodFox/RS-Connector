@@ -9,10 +9,17 @@ import requests
 
 class APIClient:
     def __init__(
-        self, robot_id, stream_key, api_url=None, relay_host="0.0.0.0", relay_port=8765
+        self,
+        robot_id,
+        camera_id,
+        stream_key,
+        api_url=None,
+        relay_host="0.0.0.0",
+        relay_port=8765,
     ):
         # Setup variables
         self.robot_id = robot_id
+        self.camera_id = camera_id
         self.stream_key = stream_key
         self.api_url = api_url or "https://api.robotstreamer.com"
 
@@ -212,7 +219,7 @@ class APIClient:
                 makePOST(
                     url,
                     {
-                        "camera_id": self.robot_id,
+                        "camera_id": self.camera_id,
                         "camera_status": "online",
                         "stream_key": self.stream_key,
                         "type": "robot_git",
@@ -263,7 +270,7 @@ class APIClient:
         This format comes from send_video.py of the RS docs
         """
 
-        url = f"{self.api_url}/v1/get_endpoint/jsmpeg_video_capture/{self.robot_id}"
+        url = f"{self.api_url}/v1/get_endpoint/jsmpeg_video_capture/{self.camera_id}"
         self.logger.info(f"Querying video endpoint: {url}")
         try:
             resp = requests.get(url)

@@ -37,7 +37,7 @@ class Streamer:
         xres=768,
         yres=432,
         framerate=25,
-        kbps=350,
+        kbps=650,
         rotation_option="",
     ):
         """
@@ -60,7 +60,6 @@ class Streamer:
             cmd,
             shell=True,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
         )
 
     def stop_stream(self):
