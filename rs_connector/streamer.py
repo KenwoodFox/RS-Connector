@@ -48,100 +48,78 @@ class Streamer:
         audio_kbps=64,
     ):
         """
-        Start ffmpeg for robot jsmpeg video streaming using the provided endpoint dict.
+        Start ffmpeg for robot jsmpeg video and audio streaming using the provided endpoints.
         video_endpoint: dict with 'host' and 'port'
-        audio_endpoint: dict with 'host' and 'port' (optional, for future real audio)
+        audio_endpoint: dict with 'host' and 'port'
         """
         import threading
         import time
 
-        host = video_endpoint["host"]
-        port = video_endpoint["port"]
-        url = f"http://{host}:{port}/{self.stream_key}/{xres}/{yres}/"
+        vhost = video_endpoint["host"]
+        vport = video_endpoint["port"]
+        video_url = f"http://{vhost}:{vport}/{self.stream_key}/{xres}/{yres}/"
+        if audio_endpoint:
+            ahost = audio_endpoint["host"]
+            aport = audio_endpoint["port"]
+            audio_url = f"http://{ahost}:{aport}/{self.stream_key}/640/480/"
+        else:
+            audio_url = video_url  # fallback
 
-        def start_video():
-            import threading
+        if self.video_device.startswith("/dev/video"):
+            video_input = f"-f v4l2 -framerate {framerate} -video_size {xres}x{yres} -r {framerate} -i {self.video_device} {rotation_option}"
+        else:
+            video_input = f"-loop 1 -framerate {framerate} -video_size {xres}x{yres} -i {self.video_device}"
+        audio_input = f"-f lavfi -ac {audio_channels} -i anullsrc=channel_layout=mono:sample_rate={audio_sample_rate}"
 
-            if self.video_device.startswith("/dev/video"):
-                input_arg = f"-f v4l2 -framerate {framerate} -video_size {xres}x{yres} -r {framerate} -i {self.video_device} {rotation_option}"
+        # Use -map to send video to video_url and audio to audio_url
+        cmd = (
+            f"ffmpeg {video_input} {audio_input} "
+            f"-map 0:v -c:v mpeg1video -b:v {kbps}k -bf 0 -muxdelay 0.001 -f mpegts {video_url} "
+            f"-map 1:a -c:a mp2 -b:a {audio_kbps}k -muxdelay 0.01 -f mpegts {audio_url}"
+        )
+        self.logger.info(f"Starting ffmpeg (jsmpeg video+audio): {cmd}")
+        proc = subprocess.Popen(
+            cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+        )
+
+        def log_ffmpeg_output():
+            if self.logger.isEnabledFor(logging.DEBUG):
+                for line in proc.stdout:
+                    self.logger.debug(f"[ffmpeg] {line.strip()}")
             else:
-                input_arg = f"-loop 1 -framerate {framerate} -video_size {xres}x{yres} -i {self.video_device}"
-            video_args = f"-c:v mpeg1video -b:v {kbps}k -bf 0 -muxdelay 0.001"
-            cmd = f"ffmpeg {input_arg} {video_args} -f mpegts {url}"
-            self.logger.info(f"Starting ffmpeg (jsmpeg video): {cmd}")
-            proc = subprocess.Popen(
-                cmd,
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
+                for _ in proc.stdout:
+                    pass
 
-            def log_ffmpeg_output():
-                if self.logger.isEnabledFor(logging.DEBUG):
-                    for line in proc.stdout:
-                        self.logger.debug(f"[ffmpeg video] {line.strip()}")
-                else:
-                    for _ in proc.stdout:
-                        pass  # discard output
+        threading.Thread(target=log_ffmpeg_output, daemon=True).start()
+        self.video_proc = proc
+        self.audio_proc = proc
 
-            threading.Thread(target=log_ffmpeg_output, daemon=True).start()
-            return proc
-
-        def start_audio():
-            import threading
-
-            # For now, always use sine tone
-            if audio_endpoint:
-                audio_host = audio_endpoint["host"]
-                audio_port = audio_endpoint["port"]
-                audio_url = (
-                    f"http://{audio_host}:{audio_port}/{self.stream_key}/640/480/"
-                )
-            else:
-                audio_url = url  # fallback for testing
-            input_arg = f"-f lavfi -ac {audio_channels} -i anullsrc=channel_layout=mono:sample_rate={audio_sample_rate}"
-            audio_args = f"-c:a mp2 -b:a {audio_kbps}k -muxdelay 0.01"
-            cmd = f"ffmpeg {input_arg} {audio_args} -f mpegts {audio_url}"
-            self.logger.info(f"Starting ffmpeg (jsmpeg audio): {cmd}")
-            proc = subprocess.Popen(
-                cmd,
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
-
-            def log_ffmpeg_output():
-                if self.logger.isEnabledFor(logging.DEBUG):
-                    for line in proc.stdout:
-                        self.logger.debug(f"[ffmpeg audio] {line.strip()}")
-                else:
-                    for _ in proc.stdout:
-                        pass  # discard output
-
-            threading.Thread(target=log_ffmpeg_output, daemon=True).start()
-            return proc
-
+        # Monitor just this one process
         def monitor():
             while True:
-                self.video_proc = start_video()
-                self.audio_proc = start_audio()
-
-                while True:
-                    v_ret = self.video_proc.poll()
-                    a_ret = self.audio_proc.poll()
-                    if v_ret is not None or a_ret is not None:
-                        self.logger.error(
-                            "ffmpeg video or audio process not running! Restarting both..."
-                        )
-                        self.video_proc.terminate()
-                        self.audio_proc.terminate()
-                        self.video_proc.wait()
-                        self.audio_proc.wait()
-                        time.sleep(2)
-                        break
-                    time.sleep(1)
+                ret = proc.poll()
+                if ret is not None:
+                    self.logger.error(
+                        f"ffmpeg process exited with code {ret}! Restarting..."
+                    )
+                    proc.terminate()
+                    proc.wait()
+                    time.sleep(2)
+                    # Restart
+                    self.start_jsmpeg_stream(
+                        video_endpoint,
+                        xres=xres,
+                        yres=yres,
+                        framerate=framerate,
+                        kbps=kbps,
+                        rotation_option=rotation_option,
+                        audio_endpoint=audio_endpoint,
+                        audio_sample_rate=audio_sample_rate,
+                        audio_channels=audio_channels,
+                        audio_kbps=audio_kbps,
+                    )
+                    break
+                time.sleep(1)
 
         self.monitor_thread = threading.Thread(target=monitor, daemon=True)
         self.monitor_thread.start()

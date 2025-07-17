@@ -208,14 +208,14 @@ class APIClient:
         def makePOST(url, data):
             try:
                 resp = requests.post(url, json=data)
-                self.logger.info(f"Camera alive POST {url} status {resp.status_code}")
+                self.logger.debug(f"Camera alive POST {url} status {resp.status_code}")
             except Exception as e:
                 self.logger.error(f"Could not make post to {url}: {e}")
 
         def alive_loop():
             url = f"{self.api_url}/v1/set_camera_status"
             while not getattr(self, "_stop_alive", False):
-                self.logger.info("sending camera alive message")
+                self.logger.debug("sending camera alive message")
                 makePOST(
                     url,
                     {
