@@ -195,6 +195,45 @@ class APIClient:
         except Exception as e:
             self.logger.error(f"WebSocket error: {e}")
 
+    def send_camera_alive_message(self):
+        """Send a camera alive message to the robotstreamer API every 5 seconds in a background thread."""
+
+        def makePOST(url, data):
+            try:
+                resp = requests.post(url, json=data)
+                self.logger.info(f"Camera alive POST {url} status {resp.status_code}")
+            except Exception as e:
+                self.logger.error(f"Could not make post to {url}: {e}")
+
+        def alive_loop():
+            url = f"{self.api_url}/v1/set_camera_status"
+            while not getattr(self, "_stop_alive", False):
+                self.logger.info("sending camera alive message")
+                makePOST(
+                    url,
+                    {
+                        "camera_id": self.robot_id,
+                        "camera_status": "online",
+                        "stream_key": self.stream_key,
+                        "type": "robot_git",
+                    },
+                )
+                for _ in range(5):
+                    if getattr(self, "_stop_alive", False):
+                        break
+                    time.sleep(1)
+
+        import threading, time
+
+        self._stop_alive = False
+        self._alive_thread = threading.Thread(target=alive_loop, daemon=True)
+        self._alive_thread.start()
+
+    def stop_camera_alive_message(self):
+        self._stop_alive = True
+        if hasattr(self, "_alive_thread"):
+            self._alive_thread.join()
+
     def start(self):
         # Start the asyncio event loop in a background thread
         def run():
@@ -205,6 +244,7 @@ class APIClient:
         self.thread = threading.Thread(target=run, daemon=True)
         self.thread.start()
         self.logger.info("WebSocket client started.")
+        self.send_camera_alive_message()
 
     def stop(self):
         # Signal async tasks to stop and wait for thread to finish
@@ -213,6 +253,7 @@ class APIClient:
             self.loop.call_soon_threadsafe(self.async_stop_event.set)
         if self.thread:
             self.thread.join()
+        self.stop_camera_alive_message()
         self.logger.info("WebSocket client stopped.")
 
     def get_jsmpeg_video_endpoint(self):

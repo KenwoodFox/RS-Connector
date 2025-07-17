@@ -48,12 +48,19 @@ class Streamer:
         host = video_endpoint["host"]
         port = video_endpoint["port"]
         url = f"http://{host}:{port}/{self.stream_key}/{xres}/{yres}/"
-        input_arg = f"-f v4l2 -framerate {framerate} -video_size {xres}x{yres} -r {framerate} -i {self.video_device} {rotation_option}"
+
+        if self.video_device.startswith("/dev/video"):
+            input_arg = f"-f v4l2 -framerate {framerate} -video_size {xres}x{yres} -r {framerate} -i {self.video_device} {rotation_option}"
+        else:  # Mostly just for testing
+            input_arg = f"-loop 1 -framerate {framerate} -i {self.video_device}"
+
         cmd = f"ffmpeg {input_arg} -f mpegts -codec:v mpeg1video -b:v {kbps}k -bf 0 -muxdelay 0.001 {url}"
         self.logger.info(f"Starting ffmpeg (jsmpeg): {cmd}")
         self.proc = subprocess.Popen(
             cmd,
             shell=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
 
     def stop_stream(self):
