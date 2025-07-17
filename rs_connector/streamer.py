@@ -1,14 +1,19 @@
 import os
 import subprocess
 import logging
+import io
+from PIL import Image
 
 
 class Streamer:
-    def __init__(self, video_device, robot_id, stream_key, ffmpeg_opts=None):
+    def __init__(
+        self, video_device, robot_id, stream_key, ffmpeg_opts=None, overlay_path=None
+    ):
         self.video_device = video_device
         self.robot_id = robot_id
         self.stream_key = stream_key
         self.ffmpeg_opts = ffmpeg_opts or ""
+        self.overlay_path = overlay_path
         self.rtmp_url = (
             f"rtmp://rtmp.robotstreamer.com/live/{self.robot_id}?key={self.stream_key}"
         )
@@ -54,6 +59,12 @@ class Streamer:
         """
         import threading
         import time
+        import os
+
+        fifo_path = "/tmp/rs_connector_pipe"
+        # Create FIFO if it doesn't exist
+        if not os.path.exists(fifo_path):
+            os.mkfifo(fifo_path)
 
         vhost = video_endpoint["host"]
         vport = video_endpoint["port"]
@@ -65,21 +76,21 @@ class Streamer:
         else:
             audio_url = video_url  # fallback
 
-        if self.video_device.startswith("/dev/video"):
-            video_input = f"-f v4l2 -framerate {framerate} -video_size {xres}x{yres} -r {framerate} -i {self.video_device} {rotation_option}"
-        else:
-            video_input = f"-loop 1 -framerate {framerate} -video_size {xres}x{yres} -i {self.video_device}"
-        audio_input = f"-f lavfi -ac {audio_channels} -i anullsrc=channel_layout=mono:sample_rate={audio_sample_rate}"
-
-        # Use -map to send video to video_url and audio to audio_url
-        cmd = (
-            f"ffmpeg {video_input} {audio_input} "
-            f"-map 0:v -c:v mpeg1video -b:v {kbps}k -bf 0 -muxdelay 0.001 -f mpegts {video_url} "
-            f"-map 1:a -c:a mp2 -b:a {audio_kbps}k -muxdelay 0.01 -f mpegts {audio_url}"
+        ffmpeg_cmd = (
+            f"ffmpeg -f image2pipe -vcodec png -framerate {framerate} -i {fifo_path} "
+            f"-c:v mpeg1video -b:v {kbps}k -bf 0 -muxdelay 0.001 -f mpegts {video_url} "
+            f"-f lavfi -ac {audio_channels} -i anullsrc=channel_layout=mono:sample_rate={audio_sample_rate} "
+            f"-map 0:v -map 1:a -c:a mp2 -b:a {audio_kbps}k -muxdelay 0.01 -f mpegts {audio_url}"
         )
-        self.logger.info(f"Starting ffmpeg (jsmpeg video+audio): {cmd}")
+        self.logger.info(
+            f"Starting ffmpeg (jsmpeg video+audio, overlay via FIFO): {ffmpeg_cmd}"
+        )
         proc = subprocess.Popen(
-            cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+            ffmpeg_cmd,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
         )
 
         def log_ffmpeg_output():
@@ -91,10 +102,60 @@ class Streamer:
                     pass
 
         threading.Thread(target=log_ffmpeg_output, daemon=True).start()
+
+        def overlay_writer():
+            blank_overlay = None
+            while True:
+                try:
+                    # Get base frame
+                    if self.video_device.startswith("/dev/video"):
+                        import cv2
+
+                        cap = cv2.VideoCapture(self.video_device)
+                        ret, frame = cap.read()
+                        cap.release()
+                        if not ret:
+                            self.logger.error(
+                                "Failed to capture frame from camera for overlay."
+                            )
+                            time.sleep(2)
+                            continue
+                        base = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGBA))
+                    else:
+                        base = Image.open(self.video_device).convert("RGBA")
+                    # Overlay if present, else blank
+                    overlay_img = None
+                    if self.overlay_path and os.path.exists(self.overlay_path):
+                        try:
+                            overlay_img = Image.open(self.overlay_path).convert("RGBA")
+                        except Exception as e:
+                            self.logger.error(f"Failed to load overlay PNG: {e}")
+                    if overlay_img is None:
+                        if blank_overlay is None or blank_overlay.size != base.size:
+                            blank_overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
+                        overlay_img = blank_overlay
+                    base.alpha_composite(overlay_img)
+                    # Write composited frame to FIFO as PNG
+                    buf = io.BytesIO()
+                    base.save(buf, format="PNG")
+                    with open(fifo_path, "wb") as pipe:
+                        pipe.write(buf.getvalue())
+                        pipe.flush()
+                except BrokenPipeError:
+                    self.logger.error(
+                        "Broken pipe: ffmpeg process exited, overlay writer stopping."
+                    )
+                    break
+                except Exception as e:
+                    self.logger.error(f"Overlay writer error: {e}")
+                    break
+                time.sleep(2.0)
+
+        threading.Thread(target=overlay_writer, daemon=True).start()
+
         self.video_proc = proc
         self.audio_proc = proc
 
-        # Monitor just this one process
         def monitor():
             while True:
                 ret = proc.poll()
@@ -105,7 +166,6 @@ class Streamer:
                     proc.terminate()
                     proc.wait()
                     time.sleep(2)
-                    # Restart
                     self.start_jsmpeg_stream(
                         video_endpoint,
                         xres=xres,

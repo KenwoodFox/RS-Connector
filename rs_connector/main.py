@@ -28,6 +28,7 @@ def main():
     yres = int(os.environ.get("VIDEO_YRES", 432))
     framerate = int(os.environ.get("VIDEO_FRAMERATE", 25))
     kbps = int(os.environ.get("VIDEO_KBPS", 700))
+    overlay_path = os.environ.get("OVERLAY_PATH")
 
     # Validate environment variables
     if not robot_id:
@@ -38,7 +39,9 @@ def main():
         return
 
     # Initialize streamer and API client
-    streamer = Streamer(video_device, robot_id, stream_key, ffmpeg_opts)
+    streamer = Streamer(
+        video_device, robot_id, stream_key, ffmpeg_opts, overlay_path=overlay_path
+    )
     api_client = APIClient(robot_id, camera_id, stream_key, api_url)
 
     max_restarts = 5

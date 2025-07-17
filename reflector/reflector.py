@@ -6,19 +6,19 @@ import os
 
 # Config
 RS_CONNECTOR_WS = os.environ.get("RS_CONNECTOR_WS", "ws://172.17.0.3:8765")
-OUTPUT_IMAGE = os.environ.get("REFLECTOR_IMAGE", "reflector_output.jpg")
+OUTPUT_IMAGE = os.environ.get("REFLECTOR_IMAGE", "overlay.png")
 FONT_PATH = os.environ.get(
     "REFLECTOR_FONT", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 )
 IMG_SIZE = (640, 480)
-BG_COLOR = (30, 30, 30)
+BG_COLOR = (0, 0, 0, 0)
 TEXT_COLOR = (255, 255, 255)
 
 last_button = "None"
 
 
 def update_image(text):
-    img = Image.new("RGB", IMG_SIZE, BG_COLOR)
+    img = Image.new("RGBA", IMG_SIZE, BG_COLOR)
     draw = ImageDraw.Draw(img)
     try:
         font = ImageFont.truetype(FONT_PATH, 48)
